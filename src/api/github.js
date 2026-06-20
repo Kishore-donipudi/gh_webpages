@@ -16,6 +16,21 @@ export async function fetchUser(username) {
 }
 
 /**
+ * Search users by query.
+ */
+export async function searchUsers(query, page = 1, perPage = 15) {
+  const res = await fetch(
+    `${BASE_URL}/search/users?q=${encodeURIComponent(query)}&per_page=${perPage}&page=${page}`,
+    { headers: { Accept: 'application/vnd.github.v3+json' } }
+  );
+  if (!res.ok) {
+    if (res.status === 403) throw new Error('API rate limit exceeded. Please try again later.');
+    throw new Error(`User search failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+/**
  * Fetch repositories for a GitHub user.
  */
 export async function fetchUserRepos(username, page = 1, perPage = 100) {

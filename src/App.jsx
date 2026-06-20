@@ -1,22 +1,26 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import Header from './components/Header';
 import SearchBar from './components/SearchBar';
 import UserCard from './components/UserCard';
+import UserSwipeDeck from './components/UserSwipeDeck';
 import UserReposList from './components/UserReposList';
 import RepoCard from './components/RepoCard';
 import SortControls from './components/SortControls';
 import SkeletonCards, { SkeletonUserCard } from './components/SkeletonCards';
 import ErrorMessage from './components/ErrorMessage';
-import { fetchUser, fetchUserRepos, searchReposByTopic } from './api/github';
+import { fetchUser, fetchUserRepos, searchReposByTopic, searchUsers } from './api/github';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('user');
 
   // User profile state
+  const [matchingUsers, setMatchingUsers] = useState([]);
+  const [activeUserIndex, setActiveUserIndex] = useState(0);
   const [userData, setUserData] = useState(null);
   const [userRepos, setUserRepos] = useState([]);
   const [userLoading, setUserLoading] = useState(false);
+  const [activeUserLoading, setActiveUserLoading] = useState(false);
   const [userError, setUserError] = useState('');
 
   // Topic repos state
@@ -29,9 +33,9 @@ export default function App() {
   const [topicPage, setTopicPage] = useState(1);
   const [hasMoreTopicPages, setHasMoreTopicPages] = useState(false);
 
-  // Handle user search
-  const handleUserSearch = useCallback(async (username) => {
-    setUserLoading(true);
+  // Fetch active user details (full profile + repos)
+  const fetchActiveUserDetail = useCallback(async (username) => {
+    setActiveUserLoading(true);
     setUserError('');
     setUserData(null);
     setUserRepos([]);
@@ -46,9 +50,40 @@ export default function App() {
     } catch (err) {
       setUserError(err.message);
     } finally {
-      setUserLoading(false);
+      setActiveUserLoading(false);
     }
   }, []);
+
+  // Handle user search
+  const handleUserSearch = useCallback(async (query) => {
+    setUserLoading(true);
+    setUserError('');
+    setMatchingUsers([]);
+    setActiveUserIndex(0);
+    setUserData(null);
+    setUserRepos([]);
+
+    try {
+      const searchResult = await searchUsers(query);
+      if (!searchResult.items || searchResult.items.length === 0) {
+        throw new Error('No users found matching this query');
+      }
+      setMatchingUsers(searchResult.items);
+      setActiveUserIndex(0);
+      await fetchActiveUserDetail(searchResult.items[0].login);
+    } catch (err) {
+      setUserError(err.message);
+    } finally {
+      setUserLoading(false);
+    }
+  }, [fetchActiveUserDetail]);
+
+  // Effect to load new user profile when index changes
+  useEffect(() => {
+    if (matchingUsers.length > 0 && matchingUsers[activeUserIndex]) {
+      fetchActiveUserDetail(matchingUsers[activeUserIndex].login);
+    }
+  }, [activeUserIndex, matchingUsers, fetchActiveUserDetail]);
 
   // Handle topic search
   const handleTopicSearch = useCallback(
@@ -148,24 +183,36 @@ export default function App() {
               <div className="mt-8">
                 <ErrorMessage message={userError} onDismiss={() => setUserError('')} />
 
-                {userLoading && <SkeletonUserCard />}
+                {userLoading && matchingUsers.length === 0 && <SkeletonUserCard />}
 
                 <AnimatePresence mode="wait">
-                  {userData && !userLoading && (
+                  {matchingUsers.length > 0 && !userLoading && (
                     <motion.div
-                      key={userData.login}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
+                      key={`deck-${matchingUsers.map(u => u.login).join('-')}`}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -20 }}
                     >
-                      <UserCard user={userData} />
-                      <UserReposList repos={userRepos} />
+                      <UserSwipeDeck
+                        matchingUsers={matchingUsers}
+                        activeUserIndex={activeUserIndex}
+                        onIndexChange={setActiveUserIndex}
+                        userData={userData}
+                        isLoadingDetails={activeUserLoading}
+                      />
+                      
+                      {/* Repos list for active user */}
+                      {userData && !activeUserLoading && (
+                        <div className="mt-12">
+                          <UserReposList repos={userRepos} />
+                        </div>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>
 
                 {/* Empty state */}
-                {!userData && !userLoading && !userError && (
+                {matchingUsers.length === 0 && !userLoading && !userError && (
                   <EmptyState
                     icon={
                       <svg className="w-16 h-16 text-primary-500/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
@@ -173,7 +220,7 @@ export default function App() {
                       </svg>
                     }
                     title="Search for a GitHub user"
-                    subtitle="Enter a username to view their profile, repositories, and stats"
+                    subtitle="Enter a name or keyword to browse profiles and repositories"
                   />
                 )}
               </div>
