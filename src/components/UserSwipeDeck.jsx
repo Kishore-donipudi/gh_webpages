@@ -10,19 +10,21 @@ export default function UserSwipeDeck({
   userData,
   isLoadingDetails,
 }) {
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [swipeDirection, setSwipeDirection] = useState(null);
+  const [isHovered, setIsHovered] = useState(false);
 
-  // Motion values for swipe animation
-  const x = useMotionValue(0);
-  const rotate = useTransform(x, [-200, 200], [-25, 25]);
-  const opacity = useTransform(x, [-200, -150, 0, 150, 200], [0.5, 1, 1, 1, 0.5]);
+  // Motion values for drag gesture on the active card
+  const dragX = useMotionValue(0);
+  const dragY = useMotionValue(0);
+  const rotate = useTransform(dragX, [-200, 200], [-25, 25]);
+  const opacity = useTransform(dragX, [-200, -150, 0, 150, 200], [0.6, 1, 1, 1, 0.6]);
 
   const handleNext = () => {
     setSwipeDirection('left');
     setTimeout(() => {
       onIndexChange((activeUserIndex + 1) % matchingUsers.length);
-      x.set(0);
+      dragX.set(0);
+      dragY.set(0);
       setSwipeDirection(null);
     }, 200);
   };
@@ -31,7 +33,8 @@ export default function UserSwipeDeck({
     setSwipeDirection('right');
     setTimeout(() => {
       onIndexChange((activeUserIndex - 1 + matchingUsers.length) % matchingUsers.length);
-      x.set(0);
+      dragX.set(0);
+      dragY.set(0);
       setSwipeDirection(null);
     }, 200);
   };
@@ -43,94 +46,120 @@ export default function UserSwipeDeck({
     } else if (info.offset.x > threshold) {
       handlePrev();
     } else {
-      x.set(0);
+      dragX.set(0);
+      dragY.set(0);
     }
   };
 
-  // Pre-load the next user's avatar image to keep animations smooth
-  const nextUser = matchingUsers[(activeUserIndex + 1) % matchingUsers.length];
-  const prevUser = matchingUsers[(activeUserIndex - 1 + matchingUsers.length) % matchingUsers.length];
-
+  // Preload next image profiles
   useEffect(() => {
+    const nextIdx = (activeUserIndex + 1) % matchingUsers.length;
+    const nextUser = matchingUsers[nextIdx];
     if (nextUser) {
       const img = new Image();
       img.src = nextUser.avatar_url;
     }
-    if (prevUser) {
-      const img = new Image();
-      img.src = prevUser.avatar_url;
+  }, [activeUserIndex, matchingUsers]);
+
+  // Render a card shell for background stacking cards so they look like real profiles
+  const renderBackgroundCard = (user, stackPosition) => {
+    // Stack position 1 = middle card, 2 = back card
+    const scale = stackPosition === 1 ? 0.96 : 0.92;
+    
+    // Spread more when hovered to create a beautiful hover reveal effect
+    let yOffset = stackPosition === 1 ? 16 : 32;
+    if (isHovered) {
+      yOffset = stackPosition === 1 ? 32 : 64;
     }
-  }, [nextUser, prevUser]);
+    
+    const rotateAngle = stackPosition === 1 ? -1.5 : 1.5;
+    const zIndex = 30 - stackPosition * 10;
+    const cardOpacity = stackPosition === 1 ? 0.8 : 0.5;
+
+    return (
+      <motion.div
+        key={`bg-card-${user.login}`}
+        initial={{ opacity: 0, scale: scale - 0.05, y: yOffset + 10 }}
+        animate={{ 
+          opacity: cardOpacity, 
+          scale: scale, 
+          y: yOffset,
+          rotate: rotateAngle
+        }}
+        exit={{ opacity: 0, scale: scale - 0.05, y: yOffset + 10 }}
+        transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+        className="absolute inset-0 w-full glass-card rounded-3xl overflow-hidden select-none pointer-events-none shadow-2xl"
+        style={{ zIndex, transformOrigin: 'bottom center' }}
+      >
+        {/* Gradient Banner matching UserCard style */}
+        <div className="h-28 sm:h-32 bg-gradient-to-r from-primary-600/60 via-purple-600/60 to-primary-500/60 relative">
+          <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSIyMCIgY3k9IjIwIiByPSIxIiBmaWxsPSJyZ2JhKDI1NSwyNTUsMjU1LDAuMDgpIi8+PC9zdmc+')] opacity-40" />
+        </div>
+
+        {/* Avatar Area */}
+        <div className="flex justify-center -mt-14 sm:-mt-16 relative">
+          <img
+            src={user.avatar_url}
+            alt=""
+            className="w-28 h-28 sm:w-32 sm:h-32 rounded-full border-4 border-surface-900 shadow-xl object-cover opacity-80"
+          />
+        </div>
+
+        {/* Basic Info */}
+        <div className="px-6 pt-4 pb-6 sm:px-8 text-center mt-2">
+          <h2 className="text-xl sm:text-2xl font-bold text-white/70">{user.login}</h2>
+          <p className="text-primary-400/50 text-sm font-medium mt-0.5">@{user.login}</p>
+          <div className="mt-8 flex justify-center">
+            <span className="px-3 py-1 rounded-full bg-primary-500/10 border border-primary-500/10 text-xs font-medium text-primary-300/40">
+              Swipe to reveal profile
+            </span>
+          </div>
+        </div>
+      </motion.div>
+    );
+  };
+
+  const activeUser = matchingUsers[activeUserIndex];
+  const nextUser = matchingUsers[(activeUserIndex + 1) % matchingUsers.length];
+  const farUser = matchingUsers[(activeUserIndex + 2) % matchingUsers.length];
 
   return (
     <div className="flex flex-col items-center w-full max-w-lg mx-auto select-none">
       {/* Swipe Deck Container */}
-      <div className="relative w-full aspect-[4/5] sm:aspect-[3/4] flex items-center justify-center min-h-[460px] sm:min-h-[500px]">
+      <div 
+        className="relative w-full aspect-[4/5] sm:aspect-[3/4] flex items-center justify-center min-h-[460px] sm:min-h-[500px]"
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >
         <AnimatePresence mode="popLayout">
-          {/* Background Card 2 (Deepest) */}
-          {matchingUsers.length > 2 && (
-            <motion.div
-              key={`bg2-${matchingUsers[(activeUserIndex + 2) % matchingUsers.length].login}`}
-              initial={{ scale: 0.85, y: 35, opacity: 0 }}
-              animate={{ scale: 0.9, y: 24, opacity: 0.35 }}
-              exit={{ scale: 0.85, y: 35, opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="absolute inset-x-0 bottom-0 glass-card rounded-3xl p-6 h-[90%] flex flex-col justify-end items-center opacity-30 select-none pointer-events-none"
-              style={{ transformOrigin: 'bottom center' }}
-            >
-              <div className="w-16 h-16 rounded-full bg-surface-800 border border-primary-500/10 mb-4 overflow-hidden">
-                <img
-                  src={matchingUsers[(activeUserIndex + 2) % matchingUsers.length].avatar_url}
-                  alt=""
-                  className="w-full h-full object-cover opacity-50"
-                />
-              </div>
-              <div className="text-white/20 font-medium text-sm">
-                @{matchingUsers[(activeUserIndex + 2) % matchingUsers.length].login}
-              </div>
-            </motion.div>
-          )}
+          {/* Background Card 2 (Furthest behind) */}
+          {matchingUsers.length > 2 && farUser && renderBackgroundCard(farUser, 2)}
 
           {/* Background Card 1 (Middle) */}
-          {matchingUsers.length > 1 && (
-            <motion.div
-              key={`bg1-${nextUser.login}`}
-              initial={{ scale: 0.9, y: 24, opacity: 0 }}
-              animate={{ scale: 0.95, y: 12, opacity: 0.7 }}
-              exit={{ scale: 0.9, y: 24, opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="absolute inset-x-0 bottom-0 glass-card rounded-3xl p-6 h-[95%] flex flex-col justify-end items-center opacity-70 select-none pointer-events-none"
-              style={{ transformOrigin: 'bottom center' }}
-            >
-              <div className="w-20 h-20 rounded-full bg-surface-800 border border-primary-500/20 mb-4 overflow-hidden">
-                <img
-                  src={nextUser.avatar_url}
-                  alt=""
-                  className="w-full h-full object-cover opacity-75"
-                />
-              </div>
-              <div className="text-white/40 font-semibold text-sm">
-                @{nextUser.login}
-              </div>
-            </motion.div>
-          )}
+          {matchingUsers.length > 1 && nextUser && renderBackgroundCard(nextUser, 1)}
 
           {/* Active Card (Front) */}
           <motion.div
-            key={`active-${matchingUsers[activeUserIndex].login}`}
-            style={{ x, rotate, opacity, zIndex: 10 }}
+            key={`active-${activeUser.login}`}
+            style={{ x: dragX, y: dragY, rotate, opacity, zIndex: 30 }}
             drag="x"
             dragConstraints={{ left: 0, right: 0 }}
             onDragEnd={handleDragEnd}
             animate={
               swipeDirection === 'left'
-                ? { x: -350, opacity: 0, scale: 0.9, rotate: -20 }
+                ? { x: -380, opacity: 0, scale: 0.9, rotate: -25 }
                 : swipeDirection === 'right'
-                ? { x: 350, opacity: 0, scale: 0.9, rotate: 20 }
-                : { x: 0, opacity: 1, scale: 1, rotate: 0 }
+                ? { x: 380, opacity: 0, scale: 0.9, rotate: 25 }
+                : { 
+                    x: 0, 
+                    y: isHovered ? -8 : 0, 
+                    opacity: 1, 
+                    scale: 1, 
+                    rotate: 0 
+                  }
             }
-            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-            className="absolute inset-0 w-full cursor-grab active:cursor-grabbing"
+            transition={{ type: 'spring', stiffness: 350, damping: 22 }}
+            className="absolute inset-0 w-full cursor-grab active:cursor-grabbing shadow-2xl"
           >
             {isLoadingDetails || !userData ? (
               <div className="h-full w-full pointer-events-none">
@@ -144,8 +173,9 @@ export default function UserSwipeDeck({
       </div>
 
       {/* Swipe Instructions */}
-      <div className="text-xs text-surface-200/30 mt-4 text-center select-none">
-        Swipe left or right, or use the controls below to browse profiles
+      <div className="text-xs text-surface-200/30 mt-10 text-center select-none flex flex-col gap-1">
+        <span className="font-semibold text-primary-400/50">Interactive 3D Stack Deck</span>
+        <span>Hover to reveal layered cards below · Swipe or use arrows to browse</span>
       </div>
 
       {/* Navigation Controls */}
